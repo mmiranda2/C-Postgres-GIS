@@ -1,0 +1,7 @@
+# gis_objects.control
+# Metadata for the gis_objects extension
+
+comment = 'GIS objects extension for PostgreSQL'
+default_version = '1.0'
+module_pathname = '$libdir/gis_objects'
+relocatable = true
