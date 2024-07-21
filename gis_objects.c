@@ -4,7 +4,6 @@
 #include "utils/elog.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
-#include <stdio.h>
 
 #ifdef PG_MODULE_MAGIC
 PG_MODULE_MAGIC;
@@ -15,44 +14,10 @@ typedef struct {
     double lon;
 } MyPoint;
 
-typedef struct {
-    int length;
-    MyPoint points[];
-} MyPolygon;
-
-static bool my_point_in_polygon_internal(MyPoint *p, MyPolygon *poly) 
+static void 
+log_my_point(MyPoint *p)
 {
-    int i, j, nvert = poly->length;
-    bool c = false;
-
-    for (i = 0, j = nvert - 1; i < nvert; j = i++) {
-        if (((poly->points[i].lon >= p->lon) != (poly->points[j].lon >= p->lon)) &&
-            (p->lat <= (poly->points[j].lat - poly->points[i].lat) * (p->lon - poly->points[i].lon) / (poly->points[j].lon - poly->points[i].lon) + poly->points[i].lat)) {
-            c = !c;
-        }
-    }
-
-    return c;
-}
-
-static void log_my_point(MyPoint *p)
-{
-    elog(INFO, "Point(%.2f, %.2f)", p->lat, p->lon);
-}
-
-static void log_my_polygon(MyPolygon *poly) 
-{
-    char buffer[1024];
-    int offset = 0;
-    offset += snprintf(buffer, sizeof(buffer), "Polygon[");
-    for (int i = 0; i < poly->length; i++) {
-        if (i > 0) {
-            offset += snprintf(buffer + offset, sizeof(buffer) - offset, ", ");
-        }
-        offset += snprintf(buffer + offset, sizeof(buffer) - offset, "Point(%.2f, %.2f)", poly->points[i].lat, poly->points[i].lon);
-    }
-    snprintf(buffer + offset, sizeof(buffer) - offset, "]");
-    elog(INFO, "%s", buffer);
+    elog(INFO, "MyPoint(%.2f, %.2f)", p->lat, p->lon);
 }
 
 PG_FUNCTION_INFO_V1(mypoint_in);
@@ -111,19 +76,40 @@ my_point_in_polygon(PG_FUNCTION_ARGS)
                       elmlen, elmbyval, elmalign,
                       &elem_values, &elem_nulls, &nitems);
 
-    for (int i = 0; i < nitems; i++)
+
+    bool result = false;
+    if(elem_nulls[nitems - 1]) 
     {
-        if (!elem_nulls[i])
-        {
-            MyPoint *pt = (MyPoint *) DatumGetPointer(elem_values[i]);
-            log_my_point(pt);
-        }
+        elog(INFO, "NULL array element, breaking...");
+        PG_RETURN_BOOL(false);
     }
 
-    // log_my_polygon(poly);
+    MyPoint *prev_pt = (MyPoint *) DatumGetPointer(elem_values[nitems - 1]);
+    for (int i = 0; i < nitems; i++)
+    {
+        if(elem_nulls[i]) 
+        {
+            elog(INFO, "NULL array element, breaking...");
+            PG_RETURN_BOOL(false);
+        }
 
-    // bool result = my_point_in_polygon_internal(p, poly);
-    bool result = false;
+        MyPoint *this_pt = (MyPoint *) DatumGetPointer(elem_values[i]);
+        elog(INFO, "p (root point): MyPoint(%.2f, %.2f)", p->lat, p->lon);
+        elog(INFO, "prev_pt: MyPoint(%.2f, %.2f)", prev_pt->lat, prev_pt->lon);
+        elog(INFO, "this_pt: MyPoint(%.2f, %.2f)", this_pt->lat, this_pt->lon);
+
+        if (((this_pt->lon >= p->lon) != (prev_pt->lon >= p->lon)) &&
+            (p->lat <= (prev_pt->lat - this_pt->lat) * (p->lon - this_pt->lon) / (prev_pt->lon - this_pt->lon) + this_pt->lat)) 
+        {
+            elog(INFO, "Flipping result... from %d to %d\n", result, !result);
+            result = !result;
+        }
+        else
+        {
+            elog(INFO, "Doing nothing... (result value is currently %d)\n", result);
+        }
+        prev_pt = this_pt;
+    }
 
     PG_RETURN_BOOL(result);
 }
