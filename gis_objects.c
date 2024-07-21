@@ -1,7 +1,9 @@
 #include "postgres.h"
 #include "fmgr.h"
+#include "utils/array.h"
 #include "utils/elog.h"
 #include "utils/builtins.h"
+#include "utils/lsyscache.h"
 #include <stdio.h>
 
 #ifdef PG_MODULE_MAGIC
@@ -14,11 +16,12 @@ typedef struct {
 } MyPoint;
 
 typedef struct {
-    int32 length;
-    MyPoint points[FLEXIBLE_ARRAY_MEMBER];
+    int length;
+    MyPoint points[];
 } MyPolygon;
 
-static bool my_point_in_polygon_internal(MyPoint *p, MyPolygon *poly) {
+static bool my_point_in_polygon_internal(MyPoint *p, MyPolygon *poly) 
+{
     int i, j, nvert = poly->length;
     bool c = false;
 
@@ -32,11 +35,13 @@ static bool my_point_in_polygon_internal(MyPoint *p, MyPolygon *poly) {
     return c;
 }
 
-static void log_my_point(MyPoint *p) {
+static void log_my_point(MyPoint *p)
+{
     elog(INFO, "Point(%.2f, %.2f)", p->lat, p->lon);
 }
 
-static void log_my_polygon(MyPolygon *poly) {
+static void log_my_polygon(MyPolygon *poly) 
+{
     char buffer[1024];
     int offset = 0;
     offset += snprintf(buffer, sizeof(buffer), "Polygon[");
@@ -51,7 +56,6 @@ static void log_my_polygon(MyPolygon *poly) {
 }
 
 PG_FUNCTION_INFO_V1(mypoint_in);
-
 Datum
 mypoint_in(PG_FUNCTION_ARGS)
 {
@@ -72,7 +76,6 @@ mypoint_in(PG_FUNCTION_ARGS)
 }
 
 PG_FUNCTION_INFO_V1(mypoint_out);
-
 Datum
 mypoint_out(PG_FUNCTION_ARGS)
 {
@@ -84,15 +87,39 @@ mypoint_out(PG_FUNCTION_ARGS)
 }
 
 PG_FUNCTION_INFO_V1(my_point_in_polygon);
-
 Datum
-my_point_in_polygon(PG_FUNCTION_ARGS) {
+my_point_in_polygon(PG_FUNCTION_ARGS) 
+{
     elog(INFO, "In my_point_in_polygon ...");
 
     MyPoint *p = (MyPoint *) PG_GETARG_POINTER(0);
-    // MyPolygon *poly = (MyPolygon *) PG_GETARG_POINTER(1);
-
     log_my_point(p);
+
+    elog(INFO, "Parsing array ...");
+    ArrayType *array = PG_GETARG_ARRAYTYPE_P(1);
+    int16 elmlen;
+    bool elmbyval;
+    char elmalign;
+    int nitems;
+    Datum *elem_values;
+    bool *elem_nulls;
+
+    get_typlenbyvalalign(ARR_ELEMTYPE(array), &elmlen, &elmbyval, &elmalign);
+
+    deconstruct_array(array,
+                      ARR_ELEMTYPE(array),
+                      elmlen, elmbyval, elmalign,
+                      &elem_values, &elem_nulls, &nitems);
+
+    for (int i = 0; i < nitems; i++)
+    {
+        if (!elem_nulls[i])
+        {
+            MyPoint *pt = (MyPoint *) DatumGetPointer(elem_values[i]);
+            log_my_point(pt);
+        }
+    }
+
     // log_my_polygon(poly);
 
     // bool result = my_point_in_polygon_internal(p, poly);
@@ -102,9 +129,9 @@ my_point_in_polygon(PG_FUNCTION_ARGS) {
 }
 
 PG_FUNCTION_INFO_V1(my_log);
-
 Datum
-my_log(PG_FUNCTION_ARGS) {
+my_log(PG_FUNCTION_ARGS) 
+{
     elog(INFO, "In my_log ...");
     elog(WARNING, "Warning in my_log ...");
     text *result = cstring_to_text("some returned string");
