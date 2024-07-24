@@ -14,11 +14,53 @@ typedef struct {
     double lon;
 } MyPoint;
 
-static void 
-log_my_point(MyPoint *p)
+typedef struct {
+    int length;
+    MyPoint points[];
+} MyPolygon;
+
+// static void
+// log_my_point_p(MyPoint *p)
+// {
+//     elog(INFO, "MyPoint(%.2f, %.2f)", p->lat, p->lon);
+// }
+
+static void
+log_my_point(MyPoint p)
 {
-    elog(INFO, "MyPoint(%.2f, %.2f)", p->lat, p->lon);
+    elog(INFO, "MyPoint(%.2f, %.2f)", p.lat, p.lon);
 }
+
+static MyPolygon*
+getarg_mypolygon(ArrayType *pg_array)
+{
+    int16 elmlen;
+    bool elmbyval;
+    char elmalign;
+    int nitems;
+    Datum *elem_values;
+    bool *elem_nulls;
+
+    get_typlenbyvalalign(ARR_ELEMTYPE(pg_array), &elmlen, &elmbyval, &elmalign);
+
+    deconstruct_array(pg_array,
+                      ARR_ELEMTYPE(pg_array),
+                      elmlen, elmbyval, elmalign,
+                      &elem_values, &elem_nulls, &nitems);
+
+    MyPolygon *poly = (MyPolygon *) malloc(sizeof(MyPolygon));
+    for (int i = 0; i < nitems; i++) 
+    {
+        if(elem_nulls[i])
+        {
+            return NULL;
+        }
+        poly->points[i] = *(MyPoint *) DatumGetPointer(elem_values[i]);
+    }
+    poly->length = nitems;
+    return poly;
+}
+
 
 PG_FUNCTION_INFO_V1(mypoint_in);
 Datum
@@ -55,51 +97,33 @@ PG_FUNCTION_INFO_V1(my_point_in_polygon);
 Datum
 my_point_in_polygon(PG_FUNCTION_ARGS) 
 {
-    elog(INFO, "In my_point_in_polygon ...");
+    elog(INFO, "In my_point_in_polygon (07232024)...");
 
-    MyPoint *p = (MyPoint *) PG_GETARG_POINTER(0);
+    MyPoint p = *(MyPoint *) PG_GETARG_POINTER(0);
     log_my_point(p);
 
     elog(INFO, "Parsing array ...");
-    ArrayType *array = PG_GETARG_ARRAYTYPE_P(1);
-    int16 elmlen;
-    bool elmbyval;
-    char elmalign;
-    int nitems;
-    Datum *elem_values;
-    bool *elem_nulls;
+    MyPolygon *poly = getarg_mypolygon(PG_GETARG_ARRAYTYPE_P(1));
 
-    get_typlenbyvalalign(ARR_ELEMTYPE(array), &elmlen, &elmbyval, &elmalign);
-
-    deconstruct_array(array,
-                      ARR_ELEMTYPE(array),
-                      elmlen, elmbyval, elmalign,
-                      &elem_values, &elem_nulls, &nitems);
-
-
-    bool result = false;
-    if(elem_nulls[nitems - 1]) 
+    if(poly == NULL)
     {
-        elog(INFO, "NULL array element, breaking...");
-        PG_RETURN_BOOL(false);
+        elog(INFO, "NULL element in array, exiting...");
+        PG_RETURN_BOOL(false); 
     }
 
-    MyPoint *prev_pt = (MyPoint *) DatumGetPointer(elem_values[nitems - 1]);
-    for (int i = 0; i < nitems; i++)
+    bool result = false;
+    int i, j, length = poly->length;
+    MyPoint this_pt, prev_pt;
+    for (i = 0, j = length - 1; i < length; j = i++)
     {
-        if(elem_nulls[i]) 
-        {
-            elog(INFO, "NULL array element, breaking...");
-            PG_RETURN_BOOL(false);
-        }
+        prev_pt = poly->points[j];
+        this_pt = poly->points[i];
+        elog(INFO, "p (root point): MyPoint(%.2f, %.2f)", p.lat, p.lon);
+        elog(INFO, "prev_pt: MyPoint(%.2f, %.2f)", prev_pt.lat, prev_pt.lon);
+        elog(INFO, "this_pt: MyPoint(%.2f, %.2f)", this_pt.lat, this_pt.lon);
 
-        MyPoint *this_pt = (MyPoint *) DatumGetPointer(elem_values[i]);
-        elog(INFO, "p (root point): MyPoint(%.2f, %.2f)", p->lat, p->lon);
-        elog(INFO, "prev_pt: MyPoint(%.2f, %.2f)", prev_pt->lat, prev_pt->lon);
-        elog(INFO, "this_pt: MyPoint(%.2f, %.2f)", this_pt->lat, this_pt->lon);
-
-        if (((this_pt->lon >= p->lon) != (prev_pt->lon >= p->lon)) &&
-            (p->lat <= (prev_pt->lat - this_pt->lat) * (p->lon - this_pt->lon) / (prev_pt->lon - this_pt->lon) + this_pt->lat)) 
+        if (((this_pt.lon >= p.lon) != (prev_pt.lon >= p.lon)) &&
+            (p.lat <= (prev_pt.lat - this_pt.lat) * (p.lon - this_pt.lon) / (prev_pt.lon - this_pt.lon) + this_pt.lat)) 
         {
             elog(INFO, "Flipping result... from %d to %d\n", result, !result);
             result = !result;
@@ -108,7 +132,6 @@ my_point_in_polygon(PG_FUNCTION_ARGS)
         {
             elog(INFO, "Doing nothing... (result value is currently %d)\n", result);
         }
-        prev_pt = this_pt;
     }
 
     PG_RETURN_BOOL(result);

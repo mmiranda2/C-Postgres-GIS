@@ -1,3 +1,6 @@
+-- DROP EXTENSION gis_objects cascade;
+CREATE EXTENSION gis_objects;
+
 -- true
 SELECT my_point_in_polygon(
     '(40.72, -74.02)'::mypoint, 
